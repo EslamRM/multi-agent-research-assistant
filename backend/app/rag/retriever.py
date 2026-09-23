@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.core.config import get_settings
+from app.rag.embeddings import OpenAIEmbeddings
+from app.rag.vector_store import QdrantStore
 
 
 @dataclass
@@ -18,27 +20,42 @@ class RetrievalResult:
 
 class SimpleRetriever:
     def __init__(self, documents: list[dict] | None = None):
-        self.settings = get_settings()
         self.documents = documents or []
 
     def search(self, query: str, limit: int | None = None) -> list[RetrievalResult]:
-        limit = limit or self.settings.max_chunks
-        query_lower = query.lower()
-        matches: list[RetrievalResult] = []
-        for document in self.documents:
-            text = document.get("content", "")
-            if query_lower in text.lower():
-                score = 0.9
-            else:
-                score = 0.3
-            matches.append(
-                RetrievalResult(
-                    document_id=document.get("document_id", "unknown"),
-                    title=document.get("title", "Untitled"),
-                    source=document.get("source", "unknown"),
-                    content=text,
-                    score=score,
-                    metadata={"document_type": document.get("document_type", "markdown")},
-                )
+        limit = limit or get_settings().max_chunks
+        q = query.lower()
+        matches = [
+            RetrievalResult(
+                document_id=d.get("document_id", "unknown"),
+                title=d.get("title", "Untitled"),
+                source=d.get("source", "unknown"),
+                content=d.get("content", ""),
+                score=0.9 if q in d.get("content", "").lower() else 0.3,
+                metadata={"document_type": d.get("document_type", "markdown")},
             )
-        return matches[:limit]
+            for d in self.documents
+        ]
+        return sorted(matches, key=lambda item: item.score, reverse=True)[:limit]
+
+
+class QdrantRetriever:
+    def __init__(self) -> None:
+        self.embeddings = OpenAIEmbeddings()
+        self.store = QdrantStore()
+
+    def search(self, query: str, limit: int | None = None) -> list[RetrievalResult]:
+        vectors = self.embeddings.embed([query])
+        if not vectors:
+            return []
+        return [
+            RetrievalResult(
+                document_id=str(hit.get("document_id", "unknown")),
+                title=str(hit.get("title", "Untitled")),
+                source=str(hit.get("source", "unknown")),
+                content=str(hit.get("content", "")),
+                score=float(hit.get("score", 0.0)),
+                metadata={k: v for k, v in hit.items() if k not in {"document_id", "title", "source", "content", "score"}},
+            )
+            for hit in self.store.search(vectors[0], limit or get_settings().max_chunks)
+        ]
