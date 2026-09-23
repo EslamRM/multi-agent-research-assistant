@@ -197,3 +197,16 @@ The interview question bank is similarly reduced to:
 - [questions/00-master-interview-questions.md](questions/00-master-interview-questions.md)
 - [questions/01-architecture-and-multi-agent.md](questions/01-architecture-and-multi-agent.md)
 - [questions/02-production-security-and-defense.md](questions/02-production-security-and-defense.md)
+
+
+## RAG milestone
+
+The research workflow can now use Qdrant as a second evidence source in addition to web search.
+
+### Local knowledge indexing
+
+Place Markdown documents under `knowledge/`, configure `OPENAI_API_KEY`, then call `POST /api/v1/knowledge/index`. The ingestion pipeline cleans Markdown, creates overlapping chunks, generates OpenAI embeddings, stores vectors in Qdrant, and makes retrieved chunks available to the Researcher as structured evidence.
+
+Each indexed chunk keeps document ID, title, source, chunk index, and content metadata for traceability.
+
+This milestone intentionally keeps indexing synchronous and Markdown-only. PDF parsing, durable document metadata, tenant isolation, background ingestion, and hybrid retrieval remain later extensions so the current Vercel deployment is not disrupted.
