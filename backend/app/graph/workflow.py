@@ -7,7 +7,8 @@ from langgraph.graph import END, StateGraph
 from app.core.config import get_settings
 from app.graph.state import ResearchState
 from app.llm.factory import get_llm_provider
-from app.schemas.research import ResearchEvidence, ResearchStatus
+from app.rag.retriever import QdrantRetriever
+from app.schemas.research import ResearchEvidence, ResearchSource, ResearchStatus
 from app.tools.search import search_sources
 
 logger = logging.getLogger(__name__)
@@ -30,15 +31,32 @@ def researcher_node(state: ResearchState) -> ResearchState:
 
     state.tasks = [task.model_dump() for task in state.research_plan.research_tasks]
     queries = [task["description"] for task in state.tasks[:get_settings().max_research_iterations + 1]] or [state.question]
-    source_map = {}
+    source_map: dict[str, ResearchSource] = {}
 
     for query in queries:
         try:
             for source in search_sources(query, limit=state.metadata.get("max_sources", get_settings().max_sources)):
                 source_map[source.url or source.id] = source
-        except Exception as exc:
-            logger.warning("research search failed: %s", exc)
-            state.add_error("researcher", "Search provider failed.", retryable=True, code="search_failed")
+        except Exception:
+            state.add_error("researcher", "Web search provider failed.", retryable=True, code="search_failed")
+
+    try:
+        for item in QdrantRetriever().search(state.question, limit=get_settings().max_chunks):
+            key = f"document:{item.document_id}:{item.metadata.get('chunk_index', 0)}"
+            source_map[key] = ResearchSource(
+                id=f"doc_{item.document_id}_{item.metadata.get('chunk_index', 0)}",
+                title=item.title,
+                source_type="document",
+                url=item.source if item.source.startswith("http") else None,
+                metadata={
+                    "snippet": item.content,
+                    "score": item.score,
+                    "document_id": item.document_id,
+                    "chunk_index": item.metadata.get("chunk_index"),
+                },
+            )
+    except Exception:
+        logger.info("Qdrant retrieval unavailable; continuing with web research.")
 
     state.sources = list(source_map.values())[:state.metadata.get("max_sources", get_settings().max_sources)]
     state.evidence = [
@@ -58,6 +76,7 @@ def researcher_node(state: ResearchState) -> ResearchState:
     state.completed_tasks = [task["id"] for task in state.tasks] if state.sources else []
     state.metadata["source_count"] = len(state.sources)
     state.metadata["evidence_count"] = len(state.evidence)
+    state.metadata["retrieval_types"] = sorted({source.source_type for source in state.sources})
     return state
 
 
@@ -92,11 +111,14 @@ def reporter_node(state: ResearchState) -> ResearchState:
 
 def build_graph():
     workflow = StateGraph(ResearchState)
-    workflow.add_node("planner", planner_node)
-    workflow.add_node("researcher", researcher_node)
-    workflow.add_node("quality_check", quality_check_node)
-    workflow.add_node("summarizer", summarizer_node)
-    workflow.add_node("reporter", reporter_node)
+    for name, node in {
+        "planner": planner_node,
+        "researcher": researcher_node,
+        "quality_check": quality_check_node,
+        "summarizer": summarizer_node,
+        "reporter": reporter_node,
+    }.items():
+        workflow.add_node(name, node)
     workflow.set_entry_point("planner")
     workflow.add_edge("planner", "researcher")
     workflow.add_edge("researcher", "quality_check")
