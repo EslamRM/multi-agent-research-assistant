@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 class ResearchSource(BaseModel):
     id: str
     title: str
-    source_type: str = Field(..., description="web, document, internal, article")
+    source_type: str
     url: str | None = None
     author: str | None = None
     published_at: datetime | None = None
@@ -22,7 +22,7 @@ class ResearchSource(BaseModel):
 class ResearchTask(BaseModel):
     id: str
     description: str
-    priority: int = Field(default=1)
+    priority: int = 1
     depends_on: list[str] = Field(default_factory=list)
     status: Literal["pending", "completed", "failed"] = "pending"
 
@@ -49,7 +49,7 @@ class ResearchEvidence(BaseModel):
 class ResearchFinding(BaseModel):
     id: str
     claim: str
-    evidence: list[ResearchEvidence]
+    evidence: list[ResearchEvidence] = Field(default_factory=list)
     contradictions: list[str] = Field(default_factory=list)
     uncertainty: str = ""
     confidence: float = Field(ge=0.0, le=1.0)
@@ -61,6 +61,7 @@ class ResearchSummary(BaseModel):
     contradictions: list[str] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
     missing_information: list[str] = Field(default_factory=list)
+    findings: list[ResearchFinding] = Field(default_factory=list)
 
 
 class FinalReport(BaseModel):
@@ -72,11 +73,12 @@ class FinalReport(BaseModel):
     sources: list[str] = Field(default_factory=list)
     conclusion: str
     confidence: float = Field(ge=0.0, le=1.0)
+    citations: list[ResearchSource] = Field(default_factory=list)
 
 
 class ResearchRequest(BaseModel):
-    question: str = Field(..., min_length=3)
-    max_sources: int = Field(default=5, ge=1, le=20)
+    question: str = Field(..., min_length=3, max_length=1000)
+    max_sources: int = Field(default=5, ge=1, le=10)
     research_mode: Literal["deep", "standard"] = "standard"
 
 
@@ -86,6 +88,7 @@ class ResearchResponse(BaseModel):
     report: FinalReport | None = None
     sources: list[ResearchSource] = Field(default_factory=list)
     error: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentError(BaseModel):
