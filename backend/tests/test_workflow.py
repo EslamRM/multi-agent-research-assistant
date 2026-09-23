@@ -1,5 +1,6 @@
 from app.graph.state import ResearchState, coerce_state
 from app.graph import workflow
+from app.schemas.research import ResearchSource
 
 
 def test_graph_happy_path(monkeypatch):
@@ -7,7 +8,7 @@ def test_graph_happy_path(monkeypatch):
         workflow,
         "search_sources",
         lambda query, limit=5: [
-            workflow.ResearchSource(
+            ResearchSource(
                 id="test_source",
                 title="Test source",
                 source_type="test",
@@ -17,10 +18,11 @@ def test_graph_happy_path(monkeypatch):
         ],
     )
 
-    graph = workflow.build_graph()
-    state = ResearchState(research_id="res_123", question="What is a useful research question?")
-
-    result = coerce_state(graph.invoke(state))
+    result = coerce_state(
+        workflow.build_graph().invoke(
+            ResearchState(research_id="res_123", question="What is a useful research question?")
+        )
+    )
 
     assert result.research_plan is not None
     assert result.sources
