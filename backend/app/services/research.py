@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
-from app.graph.workflow import build_graph
 from app.graph.state import ResearchState, coerce_state
-from app.schemas.research import ResearchRequest, ResearchResponse
+from app.graph.workflow import build_graph
+from app.schemas.research import ResearchRequest, ResearchResponse, ResearchStatus
 
 
 def execute_research(request: ResearchRequest) -> ResearchResponse:
@@ -13,19 +13,24 @@ def execute_research(request: ResearchRequest) -> ResearchResponse:
     state = ResearchState(
         research_id=research_id,
         question=request.question,
-        status=__import__("app.schemas.research", fromlist=["ResearchStatus"]).ResearchStatus.pending,
-        metadata={"created_at": datetime.utcnow().isoformat(), "request": request.model_dump()},
+        status=ResearchStatus.pending,
+        metadata={
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "request": request.model_dump(),
+            "max_sources": request.max_sources,
+            "research_mode": request.research_mode,
+        },
     )
 
-    graph = build_graph()
-    result = coerce_state(graph.invoke(state))
+    result = coerce_state(build_graph().invoke(state))
 
     if result.final_report is None:
         return ResearchResponse(
             research_id=research_id,
             status="failed",
-            error="Research workflow did not produce a final report.",
-            sources=[source for source in result.sources],
+            error=result.errors[-1].message if result.errors else "Research workflow did not produce a final report.",
+            sources=result.sources,
+            metadata={"errors": [error.model_dump() for error in result.errors], **result.metadata},
         )
 
     return ResearchResponse(
@@ -33,4 +38,5 @@ def execute_research(request: ResearchRequest) -> ResearchResponse:
         status="completed",
         report=result.final_report,
         sources=result.sources,
+        metadata=result.metadata,
     )
