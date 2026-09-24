@@ -53,7 +53,6 @@ class GroqProvider(LLMProvider):
                 self._json(
                     "You are a research planner. Return ONLY valid JSON matching the exact ResearchPlan schema. "
                     "research_tasks MUST be an array of objects, never strings. Each task object must contain id, description, priority, depends_on, status. "
-"
                     "Create focused, non-overlapping research questions for the user's question. "
                     "Do not invent sources.",
                     f"Create a research plan for: {question}. "
