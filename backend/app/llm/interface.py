@@ -8,74 +8,109 @@ from app.schemas.research import FinalReport, ResearchPlan, ResearchSummary
 class LLMProvider(ABC):
     @abstractmethod
     def plan_research(self, question: str) -> ResearchPlan:
-        """Return a structured research plan."""
+        pass
 
     @abstractmethod
     def summarize_evidence(self, evidence: list[dict], question: str) -> ResearchSummary:
-        """Condense evidence into a structured summary."""
+        pass
 
     @abstractmethod
     def generate_report(self, question: str, summary: ResearchSummary, sources: list[dict]) -> FinalReport:
-        """Produce the final report from grounded findings."""
+        pass
+
+
+def _build_fallback_plan(question: str) -> ResearchPlan:
+    q = question.strip()
+    lowered = q.lower()
+
+    if any(word in lowered for word in ("latest", "newest", "current", "models", "model", "compare")):
+        sub_questions = [
+            f"Which current AI models are relevant to: {q}?",
+            f"What are the documented capabilities and major differences of the models relevant to: {q}?",
+            f"What are the latest official model versions, availability, and context or modality characteristics?",
+            f"What limitations, pricing, or usage constraints are documented for those models?",
+        ]
+    elif "security" in lowered:
+        sub_questions = [
+            f"What are the main security considerations for: {q}?",
+            f"What evidence and documented risks exist for: {q}?",
+            f"What mitigations or controls are recommended for: {q}?",
+        ]
+    else:
+        sub_questions = [
+            f"What is the scope and current state of: {q}?",
+            f"What evidence supports the main claims about: {q}?",
+            f"What limitations, disagreements, or uncertainty exist around: {q}?",
+            f"What are the practical implications of the evidence for: {q}?",
+        ]
+
+    tasks = [
+        {"id": f"task_{i}", "description": item, "priority": i, "depends_on": [f"task_{i-1}"] if i > 1 else [], "status": "pending"}
+        for i, item in enumerate(sub_questions, 1)
+    ]
+    return ResearchPlan(
+        question=q,
+        sub_questions=sub_questions,
+        research_tasks=tasks,
+        rationale="The fallback planner creates question-specific research tasks so retrieval can proceed even when an LLM provider is unavailable.",
+    )
+
+
+def _fallback_summary(evidence: list[dict], question: str) -> ResearchSummary:
+    findings = []
+    for i, item in enumerate(evidence[:6], 1):
+        text = str(item.get("evidence") or "").strip()
+        if not text:
+            continue
+        from app.schemas.research import ResearchEvidence, ResearchFinding
+        ev = ResearchEvidence.model_validate(item)
+        findings.append(
+            ResearchFinding(
+                id=f"finding_{i}",
+                claim=ev.claim,
+                evidence=[ev],
+                confidence=ev.confidence,
+            )
+        )
+    return ResearchSummary(
+        key_findings=[item.claim for item in findings[:5]],
+        supporting_evidence=[item.evidence[0].evidence[:500] for item in findings[:5]],
+        contradictions=[],
+        limitations=["Fallback synthesis was used; the LLM provider was unavailable or returned invalid structured output."],
+        missing_information=[],
+        findings=findings,
+    )
+
+
+def _fallback_report(question: str, summary: ResearchSummary, sources: list[dict]) -> FinalReport:
+    source_titles = [str(source.get("title", "Unknown source")) for source in sources]
+    return FinalReport(
+        title=f"Research report: {question}",
+        executive_summary=(
+            f"Research retrieved {len(sources)} source(s) relevant to the question. "
+            "The report below is grounded in the retrieved evidence rather than a prewritten answer."
+        ),
+        key_findings=summary.key_findings,
+        analysis="\n\n".join(summary.supporting_evidence) or "No additional analysis was produced.",
+        limitations=summary.limitations,
+        sources=source_titles,
+        conclusion="The available evidence should be interpreted together with the listed sources and stated limitations.",
+        confidence=min((float(item.get("confidence", 0.5)) for item in sources), default=0.5),
+        citations=[],
+    )
 
 
 class LocalFallbackProvider(LLMProvider):
     def plan_research(self, question: str) -> ResearchPlan:
-        lowered = question.lower()
-        sub_questions = [
-            "What are AI coding assistants and what capabilities do they offer?",
-            "What evidence exists on productivity impact in software engineering?",
-            "What are the main methodological limitations in current studies?",
-            "How do reported gains differ across contexts and team sizes?",
-        ]
-        if "security" in lowered:
-            sub_questions = [
-                "What security risks are associated with AI coding assistants?",
-                "What evidence exists on secure coding outcomes?",
-                "What are the known limitations and controls?",
-            ]
-
-        return ResearchPlan(
-            question=question,
-            sub_questions=sub_questions,
-            research_tasks=[
-                {"id": "task_1", "description": "Define scope and capabilities", "priority": 1, "depends_on": [], "status": "pending"},
-                {"id": "task_2", "description": "Collect evidence on productivity measures", "priority": 2, "depends_on": ["task_1"], "status": "pending"},
-                {"id": "task_3", "description": "Review limitations and conflicts", "priority": 3, "depends_on": ["task_2"], "status": "pending"},
-            ],
-            rationale="The workflow prioritizes definition, evidence collection, and evidence quality checks before final synthesis.",
-        )
+        return _build_fallback_plan(question)
 
     def summarize_evidence(self, evidence: list[dict], question: str) -> ResearchSummary:
-        claims = [item.get("claim", "Observed productivity effect") for item in evidence]
-        return ResearchSummary(
-            key_findings=[
-                "AI coding assistants often increase task throughput in repetitive development activities.",
-                "Reported gains vary widely based on task type, developer experience, and tool quality.",
-                "The strongest evidence relates to code generation and boilerplate assistance rather than full-system engineering outcomes.",
-            ],
-            supporting_evidence=claims[:3],
-            contradictions=["Large productivity gains are not universal; outcomes depend heavily on context and implementation quality."],
-            limitations=["Evidence quality varies across studies and many reports rely on self-reported measures."],
-            missing_information=["Longitudinal industry-wide productivity benchmarks remain limited."],
-        )
+        return _fallback_summary(evidence, question)
 
     def generate_report(self, question: str, summary: ResearchSummary, sources: list[dict]) -> FinalReport:
-        source_titles = [source.get("title", "Unknown source") for source in sources]
-        return FinalReport(
-            title=f"Research report: {question}",
-            executive_summary="AI coding assistants are most impactful when used for repetitive, low-context coding tasks, while gains on complex systems engineering remain more mixed and dependent on developer skill and workflow maturity.",
-            key_findings=summary.key_findings,
-            analysis="The evidence base suggests that productivity effects are real but uneven. Gains are strongest for boilerplate generation, test scaffolding, and code completion, while higher-level planning, debugging, and architectural reasoning still require expert oversight.",
-            limitations=summary.limitations,
-            sources=source_titles,
-            conclusion="AI coding assistants should be treated as force-multipliers for specific tasks rather than substitutes for engineering judgment.",
-            confidence=0.72,
-        )
+        return _fallback_report(question, summary, sources)
 
 
 def parse_json_model(raw: str, model_type):
-    """Parse an LLM JSON response into a Pydantic model."""
     import json
-
     return model_type.model_validate(json.loads(raw))
