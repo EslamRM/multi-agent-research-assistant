@@ -10,6 +10,7 @@ from app.llm.factory import get_llm_provider
 from app.rag.retriever import QdrantRetriever
 from app.schemas.research import ResearchEvidence, ResearchSource, ResearchStatus
 from app.services.evaluation import evaluate_evidence
+from app.services.contradictions import detect_conflicts
 from app.services.grounding import assess_findings
 from app.tools.search import search_sources
 
@@ -100,10 +101,26 @@ def reporter_node(state: ResearchState) -> ResearchState:
     state.final_report = get_llm_provider().generate_report(
         state.question, state.summary, [source.model_dump() for source in state.sources]
     )
+    conflicts = detect_conflicts(state.evidence)
+    conflict_by_evidence = {item.evidence_a: item for item in conflicts} | {item.evidence_b: item for item in conflicts}
+    for finding in state.summary.findings:
+        related_ids = {item.id for item in finding.evidence}
+        finding.contradictions = [
+            f"Potential conflict between evidence {item.evidence_a} and {item.evidence_b}: {item.reason}"
+            for item in conflicts
+            if item.evidence_a in related_ids or item.evidence_b in related_ids
+        ]
+        if finding.contradictions:
+            finding.uncertainty = "Evidence is conflicting; report the disagreement rather than presenting one side as settled fact."
+    state.metadata["conflicts"] = [item.__dict__ for item in conflicts]
     quality = evaluate_evidence(state.evidence, state.summary)
     assessments = assess_findings(state.summary.findings, state.evidence)
     unsupported = [item for item in assessments if not item.supported]
     state.metadata["claim_grounding"] = [item.__dict__ for item in assessments]
+    if conflicts:
+        quality_warnings = list(quality.warnings)
+        quality_warnings.append(f"{len(conflicts)} potential evidence conflict(s) require cautious reporting.")
+        quality = type(quality)(quality.evidence_coverage, quality.source_diversity, quality.citation_coverage, quality.groundedness, quality.overall * max(0.0, 1.0 - 0.05 * len(conflicts)), quality_warnings)
     if unsupported:
         quality_warnings = list(quality.warnings)
         quality_warnings.append(f"{len(unsupported)} finding(s) have weak direct evidence support.")
