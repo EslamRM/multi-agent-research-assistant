@@ -72,3 +72,10 @@ class LocalFallbackProvider(LLMProvider):
             conclusion="AI coding assistants should be treated as force-multipliers for specific tasks rather than substitutes for engineering judgment.",
             confidence=0.72,
         )
+
+
+def parse_json_model(raw: str, model_type):
+    """Parse an LLM JSON response into a Pydantic model."""
+    import json
+
+    return model_type.model_validate(json.loads(raw))
