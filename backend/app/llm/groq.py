@@ -93,7 +93,7 @@ class GroqProvider(LLMProvider):
             return parse_json_model(
                 self._json(
                     "You are the final research reporter. Return ONLY valid JSON matching the exact FinalReport schema. "
-                    "The top-level keys MUST be title, executive_summary, key_findings, analysis, limitations, conclusion, confidence, citations. key_findings MUST be an array of strings. citations MUST be an array of complete source objects with id, title, source_type, url, metadata; copy these fields from supplied sources. "
+                    "The top-level keys MUST be title, executive_summary, key_findings, analysis, limitations, conclusion, confidence, citations. key_findings MUST be an array of strings. citations MUST be an array of complete source objects with id, title, source_type, url, metadata; copy these fields from supplied sources. limitations MUST be an array of strings, never a single string. "
                     "Never return a top-level answer key. "
                     "Answer the user's question directly using only the supplied summary and sources. "
                     "Do not repeat source snippets. Synthesize them into coherent findings and analysis. "
