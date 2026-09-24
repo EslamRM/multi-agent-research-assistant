@@ -58,12 +58,17 @@ def _build_fallback_plan(question: str) -> ResearchPlan:
 
 def _fallback_summary(evidence: list[dict], question: str) -> ResearchSummary:
     findings = []
-    for i, item in enumerate(evidence[:6], 1):
+    seen: set[tuple[str, str]] = set()
+    for i, item in enumerate(evidence[:10], 1):
         text = str(item.get("evidence") or "").strip()
         if not text:
             continue
         from app.schemas.research import ResearchEvidence, ResearchFinding
         ev = ResearchEvidence.model_validate(item)
+        key = (ev.source_id, ev.evidence[:250])
+        if key in seen:
+            continue
+        seen.add(key)
         findings.append(
             ResearchFinding(
                 id=f"finding_{i}",
@@ -74,7 +79,7 @@ def _fallback_summary(evidence: list[dict], question: str) -> ResearchSummary:
         )
     return ResearchSummary(
         key_findings=[item.claim for item in findings[:5]],
-        supporting_evidence=[item.evidence[0].evidence[:500] for item in findings[:5]],
+        supporting_evidence=[item.evidence[0].evidence[:900] for item in findings[:5]],
         contradictions=[],
         limitations=["Fallback synthesis was used; the LLM provider was unavailable or returned invalid structured output."],
         missing_information=[],
