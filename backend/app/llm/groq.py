@@ -49,17 +49,26 @@ class GroqProvider(LLMProvider):
 
     def plan_research(self, question: str) -> ResearchPlan:
         try:
-            return parse_json_model(
-                self._json(
-                    "You are a research planner. Return ONLY valid JSON matching the exact ResearchPlan schema. "
-                    "research_tasks MUST be an array of objects, never strings. Each task object must contain id, description, priority, depends_on, status. priority MUST be an integer 1-10, never high, medium, or low. "
-                    "Create focused, non-overlapping research questions for the user's question. For current or latest model comparisons, first identify named models and their official sources; do not create generic questions about AI models. The current date is 2026-09-24, so latest means current as of that date and must be verified by sources. "
-                    "Do not invent sources.",
-                    f"Create a research plan for: {question}. "
-                    "Include question, sub_questions, research_tasks and rationale.",
-                ),
-                ResearchPlan,
+            raw = self._json(
+                "You are a research planner. Return ONLY valid JSON matching the exact ResearchPlan schema. "
+                "research_tasks MUST be an array of objects, never strings. Each task object must contain id, description, priority, depends_on, status. priority MUST be an integer 1-10, never high, medium, or low. "
+                "sub_questions MUST be an array of plain strings, never objects. "
+                "Create focused, non-overlapping research questions for the user's question. For current or latest model comparisons, first identify named models and their official sources; do not create generic questions about AI models. The current date is 2026-09-24, so latest means current as of that date and must be verified by sources. "
+                "Do not invent sources.",
+                f"Create a research plan for: {question}. Include question, sub_questions, research_tasks and rationale.",
             )
+            try:
+                return parse_json_model(raw, ResearchPlan)
+            except Exception:
+                import json
+                payload = json.loads(raw)
+                if isinstance(payload.get("sub_questions"), list):
+                    payload["sub_questions"] = [
+                        item.get("question", str(item)) if isinstance(item, dict) else str(item)
+                        for item in payload["sub_questions"]
+                    ]
+                return ResearchPlan.model_validate(payload)
+
         except Exception as exc:
             logger.exception("Groq planner failed: model=%s error=%s", self.settings.groq_model, exc)
             if self.settings.llm_fallback_enabled:
