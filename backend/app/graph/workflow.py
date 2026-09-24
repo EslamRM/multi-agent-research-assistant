@@ -53,13 +53,17 @@ def researcher_node(state: ResearchState) -> ResearchState:
         queries = [state.question]
 
     source_map: dict[str, ResearchSource] = {}
-    max_sources = state.metadata.get("max_sources", get_settings().max_sources)
+    max_sources = int(state.metadata.get("max_sources", get_settings().max_sources))
+    per_query_limit = max(1, min(3, max_sources))
 
-    for query in queries[: max(1, get_settings().max_research_iterations + 2)]:
+    # Do not fill the whole source budget from the first sub-question.
+    # Research should cover multiple angles of the user's question.
+    for query in queries[: max(1, get_settings().max_research_iterations + 3)]:
         try:
-            for source in search_sources(query, limit=max_sources):
+            for source in search_sources(query, limit=per_query_limit):
                 key = source.url or source.id
-                source_map[key] = source
+                if key not in source_map:
+                    source_map[key] = source
                 if len(source_map) >= max_sources:
                     break
         except Exception as exc:
@@ -95,21 +99,25 @@ def researcher_node(state: ResearchState) -> ResearchState:
         logger.info("Qdrant retrieval unavailable; continuing with web research: %s", exc)
 
     state.sources = list(source_map.values())[:max_sources]
-    state.evidence = [
-        ResearchEvidence(
-            id=f"ev_{i}",
-            claim=f"Source relevant to: {query}" if query else f"Evidence relevant to: {state.question}",
-            evidence=str(source.metadata.get("snippet") or source.title).strip()[:4000],
-            source_id=source.id,
-            source_title=source.title,
-            source_url=source.url,
-            source_type=source.source_type,
-            confidence=max(0.0, min(1.0, float(source.metadata.get("score") or 0.6))),
-            notes=f"Retrieved from {source.metadata.get('provider', source.source_type)}.",
+    state.evidence = []
+    for i, source in enumerate(state.sources, 1):
+        snippet = str(source.metadata.get("snippet") or "").strip()
+        if not snippet:
+            continue
+        query = str(source.metadata.get("query") or state.question)
+        state.evidence.append(
+            ResearchEvidence(
+                id=f"ev_{i}",
+                claim=f"Evidence retrieved for the research angle: {query}",
+                evidence=snippet[:4000],
+                source_id=source.id,
+                source_title=source.title,
+                source_url=source.url,
+                source_type=source.source_type,
+                confidence=max(0.0, min(1.0, float(source.metadata.get("score") or 0.6))),
+                notes=f"Retrieved from {source.metadata.get('provider', source.source_type)}.",
+            )
         )
-        for i, source in enumerate(state.sources, 1)
-        for query in [str(source.metadata.get("query") or state.question)]
-    ]
     state.completed_tasks = [task["id"] for task in state.tasks] if state.sources else []
     state.metadata.update(
         {
@@ -118,6 +126,7 @@ def researcher_node(state: ResearchState) -> ResearchState:
             "retrieval_types": sorted({source.source_type for source in state.sources}),
             "research_iteration": state.iteration_count,
             "queries": queries,
+            "evidence": [item.model_dump() for item in state.evidence],
         }
     )
     return state
