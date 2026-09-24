@@ -210,3 +210,8 @@ Place Markdown documents under `knowledge/`, configure `OPENAI_API_KEY`, then ca
 Each indexed chunk keeps document ID, title, source, chunk index, and content metadata for traceability.
 
 This milestone intentionally keeps indexing synchronous and Markdown-only. PDF parsing, durable document metadata, tenant isolation, background ingestion, and hybrid retrieval remain later extensions so the current Vercel deployment is not disrupted.
+
+
+## Research quality evaluation
+
+The workflow now computes evidence-quality metadata before returning a report. The score considers evidence coverage, source diversity, citation coverage, and groundedness. The final report confidence is capped by this quality score, and limitations are augmented when evidence quality is weak. The API exposes the quality metadata so the frontend or future evaluation dashboard can inspect why confidence is limited.
