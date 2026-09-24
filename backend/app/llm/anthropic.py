@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import anthropic
+import logging
 
 from app.core.config import get_settings
 from app.llm.interface import LLMProvider, LocalFallbackProvider, parse_json_model
 from app.schemas.research import FinalReport, ResearchPlan, ResearchSummary
+
+logger = logging.getLogger(__name__)
 
 
 class AnthropicProvider(LLMProvider):
@@ -27,17 +30,20 @@ class AnthropicProvider(LLMProvider):
     def plan_research(self, question: str) -> ResearchPlan:
         try:
             return parse_json_model(self._json("Return only valid JSON. Do not invent sources.", f"Create a research plan for: {question}. Return ResearchPlan."), ResearchPlan)
-        except Exception:
+        except Exception as exc:
+            logger.exception("Anthropic planner failed: model=%s error=%s", self.settings.anthropic_model, exc)
             return self.fallback.plan_research(question)
 
     def summarize_evidence(self, evidence: list[dict], question: str) -> ResearchSummary:
         try:
             return parse_json_model(self._json("Use only supplied evidence. Preserve uncertainty and conflicts. Return only JSON.", f"Question: {question}\nEvidence: {evidence}\nReturn ResearchSummary."), ResearchSummary)
-        except Exception:
+        except Exception as exc:
+            logger.exception("Anthropic summarizer failed: model=%s evidence_count=%s error=%s", self.settings.anthropic_model, len(evidence), exc)
             return self.fallback.summarize_evidence(evidence, question)
 
     def generate_report(self, question: str, summary: ResearchSummary, sources: list[dict]) -> FinalReport:
         try:
             return parse_json_model(self._json("Use only supplied findings and sources. Never invent citations. Return only JSON.", f"Question: {question}\nSummary: {summary.model_dump_json()}\nSources: {sources}\nReturn FinalReport."), FinalReport)
-        except Exception:
+        except Exception as exc:
+            logger.exception("Anthropic reporter failed: model=%s source_count=%s error=%s", self.settings.anthropic_model, len(sources), exc)
             return self.fallback.generate_report(question, summary, sources)
