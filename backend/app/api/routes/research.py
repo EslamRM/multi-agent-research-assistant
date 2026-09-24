@@ -1,10 +1,27 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import Response
 
 from app.rag.ingestion import DocumentIngestion
 from app.schemas.research import ResearchRequest, ResearchResponse
 from app.services.research import execute_research
 
 router = APIRouter(tags=["research"])
+
+
+@router.options("/research")
+def research_options(request: Request) -> Response:
+    """Handle browser CORS preflight explicitly."""
+    origin = request.headers.get("origin", "*")
+    requested_headers = request.headers.get("access-control-request-headers", "content-type")
+    return Response(
+        status_code=204,
+        headers={
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": requested_headers,
+            "Access-Control-Max-Age": "600",
+        },
+    )
 
 
 @router.post("/research", response_model=ResearchResponse)
