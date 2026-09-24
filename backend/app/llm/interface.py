@@ -117,5 +117,19 @@ class LocalFallbackProvider(LLMProvider):
 
 
 def parse_json_model(raw: str, model_type):
+    """Parse strict JSON, tolerating common markdown/code-fence wrappers."""
     import json
-    return model_type.model_validate(json.loads(raw))
+    import re
+
+    text = (raw or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^\`\`\`(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*\`\`\`$", "", text)
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if not match:
+            raise
+        payload = json.loads(match.group(0))
+    return model_type.model_validate(payload)
