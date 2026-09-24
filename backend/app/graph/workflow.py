@@ -162,6 +162,12 @@ def summarizer_node(state: ResearchState) -> ResearchState:
         [item.model_dump() for item in state.evidence],
         state.question,
     )
+    state.metadata["llm_provider"] = get_settings().llm_provider
+    state.metadata["llm_model"] = (
+        get_settings().openai_model if get_settings().llm_provider == "openai"
+        else get_settings().anthropic_model if get_settings().llm_provider == "anthropic"
+        else "local-fallback"
+    )
     if state.summary is None or not state.summary.findings:
         state.add_error(
             "summarizer",
