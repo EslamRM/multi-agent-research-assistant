@@ -10,6 +10,7 @@ from app.llm.factory import get_llm_provider
 from app.rag.retriever import QdrantRetriever
 from app.schemas.research import ResearchEvidence, ResearchSource, ResearchStatus
 from app.services.evaluation import evaluate_evidence
+from app.services.grounding import assess_findings
 from app.tools.search import search_sources
 
 logger = logging.getLogger(__name__)
@@ -100,6 +101,13 @@ def reporter_node(state: ResearchState) -> ResearchState:
         state.question, state.summary, [source.model_dump() for source in state.sources]
     )
     quality = evaluate_evidence(state.evidence, state.summary)
+    assessments = assess_findings(state.summary.findings, state.evidence)
+    unsupported = [item for item in assessments if not item.supported]
+    state.metadata["claim_grounding"] = [item.__dict__ for item in assessments]
+    if unsupported:
+        quality_warnings = list(quality.warnings)
+        quality_warnings.append(f"{len(unsupported)} finding(s) have weak direct evidence support.")
+        quality = type(quality)(quality.evidence_coverage, quality.source_diversity, quality.citation_coverage, quality.groundedness, quality.overall * max(0.0, 1.0 - 0.15 * len(unsupported)), quality_warnings)
     state.metadata["quality"] = quality.__dict__
     state.final_report.confidence = min(state.final_report.confidence, quality.overall)
     state.final_report.limitations = list(dict.fromkeys(state.final_report.limitations + quality.warnings))
