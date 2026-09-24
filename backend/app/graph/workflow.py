@@ -54,7 +54,7 @@ def researcher_node(state: ResearchState) -> ResearchState:
 
     source_map: dict[str, ResearchSource] = {}
     max_sources = int(state.metadata.get("max_sources", get_settings().max_sources))
-    per_query_limit = max(1, min(3, max_sources))
+    per_query_limit = max(1, min(2, max_sources // max(1, min(len(queries), max_sources))))
 
     # Do not fill the whole source budget from the first sub-question.
     # Research should cover multiple angles of the user's question.

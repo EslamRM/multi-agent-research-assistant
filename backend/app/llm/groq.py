@@ -52,7 +52,7 @@ class GroqProvider(LLMProvider):
             return parse_json_model(
                 self._json(
                     "You are a research planner. Return ONLY valid JSON matching the exact ResearchPlan schema. "
-                    "research_tasks MUST be an array of objects, never strings. Each task object must contain id, description, priority, depends_on, status. "
+                    "research_tasks MUST be an array of objects, never strings. Each task object must contain id, description, priority, depends_on, status. priority MUST be an integer 1-10, never "high", "medium", or "low". "
                     "Create focused, non-overlapping research questions for the user's question. "
                     "Do not invent sources.",
                     f"Create a research plan for: {question}. "
@@ -93,7 +93,7 @@ class GroqProvider(LLMProvider):
             return parse_json_model(
                 self._json(
                     "You are the final research reporter. Return ONLY valid JSON matching the exact FinalReport schema. "
-                    "The top-level keys MUST be title, executive_summary, key_findings, analysis, limitations, conclusion, confidence, citations. "
+                    "The top-level keys MUST be title, executive_summary, key_findings, analysis, limitations, conclusion, confidence, citations. key_findings MUST be an array of strings. citations MUST be an array of complete source objects with id, title, source_type, url, metadata; copy these fields from supplied sources. "
                     "Never return a top-level answer key. "
                     "Answer the user's question directly using only the supplied summary and sources. "
                     "Do not repeat source snippets. Synthesize them into coherent findings and analysis. "
