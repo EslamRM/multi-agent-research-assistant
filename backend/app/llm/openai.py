@@ -18,7 +18,7 @@ class OpenAIProvider(LLMProvider):
 
     def _json(self, system: str, prompt: str) -> str:
         if not self.client:
-            raise RuntimeError("OPENAI_API_KEY is not configured")
+            raise RuntimeError("OPENAI_API_KEY is not configured in the runtime environment")
         response = self.client.chat.completions.create(
             model=self.settings.openai_model,
             temperature=0.1,
