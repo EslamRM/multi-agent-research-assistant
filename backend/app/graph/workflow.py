@@ -157,10 +157,20 @@ def quality_check_node(state: ResearchState) -> ResearchState:
 
 
 def summarizer_node(state: ResearchState) -> ResearchState:
-    state.summary = get_llm_provider().summarize_evidence(
+    provider = get_llm_provider()
+    state.summary = provider.summarize_evidence(
         [item.model_dump() for item in state.evidence],
         state.question,
     )
+    if state.summary is None or not state.summary.findings:
+        state.add_error(
+            "summarizer",
+            "The summarizer produced no usable findings from retrieved evidence.",
+            retryable=False,
+            code="empty_summary",
+        )
+        state.mark_failed()
+        return state
     state.status = ResearchStatus.summarizing
     return state
 
@@ -172,6 +182,15 @@ def reporter_node(state: ResearchState) -> ResearchState:
         state.summary,
         [source.model_dump() for source in state.sources],
     )
+    if state.final_report is None:
+        state.add_error(
+            "reporter",
+            "The reporter did not produce a final report.",
+            retryable=False,
+            code="empty_report",
+        )
+        state.mark_failed()
+        return state
 
     conflicts = detect_conflicts(state.evidence)
     for finding in state.summary.findings:
