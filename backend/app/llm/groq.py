@@ -62,7 +62,9 @@ class GroqProvider(LLMProvider):
             )
         except Exception as exc:
             logger.exception("Groq planner failed: model=%s error=%s", self.settings.groq_model, exc)
-            return self.fallback.plan_research(question)
+            if self.settings.llm_fallback_enabled:
+                return self.fallback.plan_research(question)
+            raise
 
     def summarize_evidence(self, evidence: list[dict], question: str) -> ResearchSummary:
         try:
@@ -86,7 +88,9 @@ class GroqProvider(LLMProvider):
                 len(evidence),
                 exc,
             )
-            return self.fallback.summarize_evidence(evidence, question)
+            if self.settings.llm_fallback_enabled:
+                return self.fallback.summarize_evidence(evidence, question)
+            raise
 
     def generate_report(self, question: str, summary: ResearchSummary, sources: list[dict]) -> FinalReport:
         try:
@@ -110,4 +114,6 @@ class GroqProvider(LLMProvider):
                 len(sources),
                 exc,
             )
-            return self.fallback.generate_report(question, summary, sources)
+            if self.settings.llm_fallback_enabled:
+                return self.fallback.generate_report(question, summary, sources)
+            raise

@@ -124,21 +124,50 @@ def _duckduckgo_search(query: str, limit: int) -> list[ResearchSource]:
 
 
 def search_sources(query: str, limit: int = 5) -> list[ResearchSource]:
-    """Aggregate providers instead of accepting the first weak provider result."""
+    """Aggregate and rank results, preferring relevant primary sources."""
     providers = (_tavily_search, _duckduckgo_search, _wikipedia_search)
     merged: dict[str, ResearchSource] = {}
 
     for provider in providers:
         try:
-            provider_limit = max(2, min(limit, 5))
-            for source in provider(query, provider_limit):
+            for source in provider(query, max(3, min(limit, 5))):
                 key = source.url or source.id
                 merged.setdefault(key, source)
-                if len(merged) >= limit:
-                    break
         except (httpx.HTTPError, ValueError, KeyError, TypeError):
             continue
-        if len(merged) >= limit:
-            break
 
-    return list(merged.values())[:limit]
+    lowered = query.lower()
+    specific = any(term in lowered for term in (
+        "latest", "current", "compare", "model", "benchmark", "pricing", "api", "release"
+    ))
+
+    def rank(source: ResearchSource) -> tuple[int, float]:
+        url = (source.url or "").lower()
+        title = source.title.lower()
+        provider = str(source.metadata.get("provider", "")).lower()
+        score = float(source.metadata.get("score") or 0.0)
+        primary_domains = (
+            "openai.com", "ai.google.dev", "deepmind.google", "anthropic.com",
+            "mistral.ai", "llama.com", "meta.com", "x.ai", "cohere.com",
+            "huggingface.co", "arxiv.org",
+        )
+        relevance = sum(
+            1 for term in re.findall(r"[a-z0-9]{4,}", lowered)
+            if term not in {"what", "which", "about", "latest"} and (term in title or term in url)
+        )
+        if any(domain in url for domain in primary_domains):
+            relevance += 6
+        if provider == "tavily":
+            relevance += 2
+        if provider == "duckduckgo":
+            relevance += 1
+        if specific and ("wikipedia.org" in url or provider == "wikipedia"):
+            relevance -= 8
+        return relevance, score
+
+    ranked = sorted(merged.values(), key=rank, reverse=True)
+    if specific:
+        non_wiki = [s for s in ranked if "wikipedia.org" not in (s.url or "").lower()]
+        if non_wiki:
+            ranked = non_wiki
+    return ranked[:limit]

@@ -25,6 +25,8 @@ class Settings:
     groq_api_key: str | None = os.getenv("GROQ_API_KEY")
     groq_model: str = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+    enable_rag: bool = os.getenv("ENABLE_RAG", "false").lower() == "true"
+    llm_fallback_enabled: bool = os.getenv("LLM_FALLBACK_ENABLED", "false").lower() == "true"
     anthropic_api_key: str | None = os.getenv("ANTHROPIC_API_KEY")
     anthropic_model: str = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
     tavily_api_key: str | None = os.getenv("TAVILY_API_KEY")

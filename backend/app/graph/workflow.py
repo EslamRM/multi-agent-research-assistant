@@ -166,6 +166,7 @@ def summarizer_node(state: ResearchState) -> ResearchState:
     state.metadata["llm_model"] = (
         get_settings().openai_model if get_settings().llm_provider == "openai"
         else get_settings().anthropic_model if get_settings().llm_provider == "anthropic"
+        else get_settings().groq_model if get_settings().llm_provider == "groq"
         else "local-fallback"
     )
     if state.summary is None or not state.summary.findings:
