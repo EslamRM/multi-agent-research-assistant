@@ -220,3 +220,8 @@ The workflow now computes evidence-quality metadata before returning a report. T
 ## Claim-level grounding
 
 The report pipeline now performs a deterministic post-generation grounding check. Each structured finding is compared with its linked and retrieved evidence, producing a support score, citation IDs, contradiction count, and warnings for weakly supported claims. Weak claim grounding reduces the final quality/confidence metadata instead of allowing a high-confidence report to hide unsupported findings.
+
+
+## Evidence conflict detection
+
+The research pipeline now detects potential conflicts between evidence from different sources. Conflicting evidence is attached to affected findings, adds an uncertainty warning, is exposed in workflow metadata, and slightly reduces the overall quality score. This is a deterministic safety layer rather than an LLM deciding which source is correct; it deliberately surfaces disagreements for cautious reporting instead of silently selecting a winner.
