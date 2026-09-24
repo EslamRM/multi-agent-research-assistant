@@ -9,8 +9,8 @@ from app.graph.state import ResearchState
 from app.llm.factory import get_llm_provider
 from app.rag.retriever import QdrantRetriever
 from app.schemas.research import ResearchEvidence, ResearchSource, ResearchStatus
-from app.services.evaluation import evaluate_evidence
 from app.services.contradictions import detect_conflicts
+from app.services.evaluation import evaluate_evidence
 from app.services.grounding import assess_findings
 from app.tools.search import search_sources
 
@@ -27,41 +27,79 @@ def planner_node(state: ResearchState) -> ResearchState:
 
 def researcher_node(state: ResearchState) -> ResearchState:
     state.status = ResearchStatus.researching
+    state.iteration_count += 1
+
     if not state.research_plan:
         state.add_error("researcher", "Planner did not produce a plan.", code="missing_plan")
         state.mark_failed()
         return state
 
     state.tasks = [task.model_dump() for task in state.research_plan.research_tasks]
-    queries = [task["description"] for task in state.tasks[:get_settings().max_research_iterations + 1]] or [state.question]
+
+    # Search the actual research questions, not only generic task labels such as
+    # "collect evidence". On a retry, broaden the search with the original
+    # question and the planner's sub-questions.
+    queries: list[str] = []
+    for item in state.research_plan.sub_questions:
+        if item.strip():
+            queries.append(item.strip())
+    for task in state.tasks:
+        description = str(task.get("description", "")).strip()
+        if description and description not in queries:
+            queries.append(description)
+    if state.iteration_count > 1:
+        queries.insert(0, state.question)
+    if not queries:
+        queries = [state.question]
+
     source_map: dict[str, ResearchSource] = {}
+    max_sources = state.metadata.get("max_sources", get_settings().max_sources)
 
-    for query in queries:
+    for query in queries[: max(1, get_settings().max_research_iterations + 2)]:
         try:
-            for source in search_sources(query, limit=state.metadata.get("max_sources", get_settings().max_sources)):
-                source_map[source.url or source.id] = source
-        except Exception:
-            state.add_error("researcher", "Web search provider failed.", retryable=True, code="search_failed")
+            for source in search_sources(query, limit=max_sources):
+                key = source.url or source.id
+                source_map[key] = source
+                if len(source_map) >= max_sources:
+                    break
+        except Exception as exc:
+            logger.warning("Search failed for query %r: %s", query, exc)
+            state.add_error("researcher", f"Search failed for query: {query}", retryable=True, code="search_failed")
+        if len(source_map) >= max_sources:
+            break
 
+    # RAG is optional. A missing OpenAI embedding key or unavailable Qdrant
+    # must never prevent web research from producing evidence.
     try:
         for item in QdrantRetriever().search(state.question, limit=get_settings().max_chunks):
             key = f"document:{item.document_id}:{item.metadata.get('chunk_index', 0)}"
-            source_map[key] = ResearchSource(
-                id=f"doc_{item.document_id}_{item.metadata.get('chunk_index', 0)}",
-                title=item.title,
-                source_type="document",
-                url=item.source if item.source.startswith("http") else None,
-                metadata={"snippet": item.content, "score": item.score, "document_id": item.document_id, "chunk_index": item.metadata.get("chunk_index")},
+            source_map.setdefault(
+                key,
+                ResearchSource(
+                    id=f"doc_{item.document_id}_{item.metadata.get('chunk_index', 0)}",
+                    title=item.title,
+                    source_type="document",
+                    url=item.source if item.source.startswith("http") else None,
+                    metadata={
+                        "snippet": item.content,
+                        "score": item.score,
+                        "document_id": item.document_id,
+                        "chunk_index": item.metadata.get("chunk_index"),
+                        "provider": "qdrant",
+                    },
+                ),
             )
-    except Exception:
-        logger.info("Qdrant retrieval unavailable; continuing with web research.")
+            if len(source_map) >= max_sources:
+                break
+    except Exception as exc:
+        logger.info("Qdrant retrieval unavailable; continuing with web research: %s", exc)
 
-    state.sources = list(source_map.values())[:state.metadata.get("max_sources", get_settings().max_sources)]
+    state.sources = list(source_map.values())[:max_sources]
     state.evidence = [
         ResearchEvidence(
             id=f"ev_{i}",
-            claim=f"Evidence relevant to: {state.question}",
-            evidence=str(source.metadata.get("snippet") or source.title)[:4000],
+            claim=f"Source relevant to: {query}" if query else f"Evidence relevant to: {state.question}",
+            evidence=str(source.metadata.get("snippet") or source.title).strip()[:4000],
             source_id=source.id,
             source_title=source.title,
             source_url=source.url,
@@ -70,19 +108,38 @@ def researcher_node(state: ResearchState) -> ResearchState:
             notes=f"Retrieved from {source.metadata.get('provider', source.source_type)}.",
         )
         for i, source in enumerate(state.sources, 1)
+        for query in [str(source.metadata.get("query") or state.question)]
     ]
     state.completed_tasks = [task["id"] for task in state.tasks] if state.sources else []
-    state.metadata.update({
-        "source_count": len(state.sources),
-        "evidence_count": len(state.evidence),
-        "retrieval_types": sorted({source.source_type for source in state.sources}),
-    })
+    state.metadata.update(
+        {
+            "source_count": len(state.sources),
+            "evidence_count": len(state.evidence),
+            "retrieval_types": sorted({source.source_type for source in state.sources}),
+            "research_iteration": state.iteration_count,
+            "queries": queries,
+        }
+    )
     return state
 
 
 def quality_check_node(state: ResearchState) -> ResearchState:
     enough = bool(state.sources and state.evidence)
     state.metadata["enough_evidence"] = enough
+
+    max_retries = 1
+    if not enough and state.iteration_count <= max_retries:
+        state.should_continue = True
+        state.status = ResearchStatus.researching
+        state.metadata["retry_scheduled"] = True
+        state.add_error(
+            "quality_check",
+            "No usable evidence was retrieved; retrying with broader queries.",
+            retryable=True,
+            code="insufficient_evidence_retry",
+        )
+        return state
+
     state.should_continue = enough
     if not enough:
         state.add_error("quality_check", "No usable evidence was retrieved.", retryable=True, code="insufficient_evidence")
@@ -91,7 +148,10 @@ def quality_check_node(state: ResearchState) -> ResearchState:
 
 
 def summarizer_node(state: ResearchState) -> ResearchState:
-    state.summary = get_llm_provider().summarize_evidence([item.model_dump() for item in state.evidence], state.question)
+    state.summary = get_llm_provider().summarize_evidence(
+        [item.model_dump() for item in state.evidence],
+        state.question,
+    )
     state.status = ResearchStatus.summarizing
     return state
 
@@ -99,10 +159,12 @@ def summarizer_node(state: ResearchState) -> ResearchState:
 def reporter_node(state: ResearchState) -> ResearchState:
     state.status = ResearchStatus.reporting
     state.final_report = get_llm_provider().generate_report(
-        state.question, state.summary, [source.model_dump() for source in state.sources]
+        state.question,
+        state.summary,
+        [source.model_dump() for source in state.sources],
     )
+
     conflicts = detect_conflicts(state.evidence)
-    conflict_by_evidence = {item.evidence_a: item for item in conflicts} | {item.evidence_b: item for item in conflicts}
     for finding in state.summary.findings:
         related_ids = {item.id for item in finding.evidence}
         finding.contradictions = [
@@ -111,20 +173,39 @@ def reporter_node(state: ResearchState) -> ResearchState:
             if item.evidence_a in related_ids or item.evidence_b in related_ids
         ]
         if finding.contradictions:
-            finding.uncertainty = "Evidence is conflicting; report the disagreement rather than presenting one side as settled fact."
+            finding.uncertainty = (
+                "Evidence is conflicting; report the disagreement rather than presenting one side as settled fact."
+            )
+
     state.metadata["conflicts"] = [item.__dict__ for item in conflicts]
     quality = evaluate_evidence(state.evidence, state.summary)
     assessments = assess_findings(state.summary.findings, state.evidence)
     unsupported = [item for item in assessments if not item.supported]
     state.metadata["claim_grounding"] = [item.__dict__ for item in assessments]
+
     if conflicts:
-        quality_warnings = list(quality.warnings)
-        quality_warnings.append(f"{len(conflicts)} potential evidence conflict(s) require cautious reporting.")
-        quality = type(quality)(quality.evidence_coverage, quality.source_diversity, quality.citation_coverage, quality.groundedness, quality.overall * max(0.0, 1.0 - 0.05 * len(conflicts)), quality_warnings)
+        warnings = list(quality.warnings)
+        warnings.append(f"{len(conflicts)} potential evidence conflict(s) require cautious reporting.")
+        quality = type(quality)(
+            quality.evidence_coverage,
+            quality.source_diversity,
+            quality.citation_coverage,
+            quality.groundedness,
+            quality.overall * max(0.0, 1.0 - 0.05 * len(conflicts)),
+            warnings,
+        )
     if unsupported:
-        quality_warnings = list(quality.warnings)
-        quality_warnings.append(f"{len(unsupported)} finding(s) have weak direct evidence support.")
-        quality = type(quality)(quality.evidence_coverage, quality.source_diversity, quality.citation_coverage, quality.groundedness, quality.overall * max(0.0, 1.0 - 0.15 * len(unsupported)), quality_warnings)
+        warnings = list(quality.warnings)
+        warnings.append(f"{len(unsupported)} finding(s) have weak direct evidence support.")
+        quality = type(quality)(
+            quality.evidence_coverage,
+            quality.source_diversity,
+            quality.citation_coverage,
+            quality.groundedness,
+            quality.overall * max(0.0, 1.0 - 0.15 * len(unsupported)),
+            warnings,
+        )
+
     state.metadata["quality"] = quality.__dict__
     state.final_report.confidence = min(state.final_report.confidence, quality.overall)
     state.final_report.limitations = list(dict.fromkeys(state.final_report.limitations + quality.warnings))
@@ -134,16 +215,29 @@ def reporter_node(state: ResearchState) -> ResearchState:
 
 def build_graph():
     workflow = StateGraph(ResearchState)
-    for name, node in {"planner": planner_node, "researcher": researcher_node, "quality_check": quality_check_node, "summarizer": summarizer_node, "reporter": reporter_node}.items():
+    for name, node in {
+        "planner": planner_node,
+        "researcher": researcher_node,
+        "quality_check": quality_check_node,
+        "summarizer": summarizer_node,
+        "reporter": reporter_node,
+    }.items():
         workflow.add_node(name, node)
+
     workflow.set_entry_point("planner")
     workflow.add_edge("planner", "researcher")
     workflow.add_edge("researcher", "quality_check")
 
     def decide_next(state: ResearchState) -> str:
-        return "summarizer" if state.should_continue else END
+        if state.should_continue:
+            return "summarizer" if state.metadata.get("enough_evidence") else "researcher"
+        return END
 
-    workflow.add_conditional_edges("quality_check", decide_next, {"summarizer": "summarizer", END: END})
+    workflow.add_conditional_edges(
+        "quality_check",
+        decide_next,
+        {"researcher": "researcher", "summarizer": "summarizer", END: END},
+    )
     workflow.add_edge("summarizer", "reporter")
     workflow.add_edge("reporter", END)
     return workflow.compile()
