@@ -19,7 +19,7 @@ def _int_env(name: str, default: int) -> int:
 @dataclass(frozen=True)
 class Settings:
     app_name: str = "multi-agent-research-assistant"
-    llm_provider: str = os.getenv("LLM_PROVIDER", "openai").lower()
+    llm_provider: str = os.getenv("LLM_PROVIDER", "groq").lower()
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     groq_api_key: str | None = os.getenv("GROQ_API_KEY")
