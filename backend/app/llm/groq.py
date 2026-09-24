@@ -51,7 +51,9 @@ class GroqProvider(LLMProvider):
         try:
             return parse_json_model(
                 self._json(
-                    "You are a research planner. Return only valid JSON matching the ResearchPlan schema. "
+                    "You are a research planner. Return ONLY valid JSON matching the exact ResearchPlan schema. "
+                    "research_tasks MUST be an array of objects, never strings. Each task object must contain id, description, priority, depends_on, status. "
+"
                     "Create focused, non-overlapping research questions for the user's question. "
                     "Do not invent sources.",
                     f"Create a research plan for: {question}. "
@@ -67,7 +69,9 @@ class GroqProvider(LLMProvider):
         try:
             return parse_json_model(
                 self._json(
-                    "You are the evidence synthesis agent. Return ONLY JSON matching the ResearchSummary schema. "
+                    "You are the evidence synthesis agent. Return ONLY valid JSON matching the exact ResearchSummary schema. "
+                    "Each finding MUST be an object containing id, claim, confidence, evidence_ids. "
+                    "Never use statement instead of claim. "
                     "Use only supplied evidence. Do not invent facts, sources, citations, or claims. "
                     "Combine duplicate evidence. Produce distinct findings, identify agreement, disagreement, "
                     "uncertainty, and missing information. Each finding must cite supplied evidence IDs.",
@@ -89,7 +93,9 @@ class GroqProvider(LLMProvider):
         try:
             return parse_json_model(
                 self._json(
-                    "You are the final research reporter. Return ONLY JSON matching the FinalReport schema. "
+                    "You are the final research reporter. Return ONLY valid JSON matching the exact FinalReport schema. "
+                    "The top-level keys MUST be title, executive_summary, key_findings, analysis, limitations, conclusion, confidence, citations. "
+                    "Never return a top-level answer key. "
                     "Answer the user's question directly using only the supplied summary and sources. "
                     "Do not repeat source snippets. Synthesize them into coherent findings and analysis. "
                     "Preserve uncertainty and disagreements. Never invent facts, citations, or source titles.",
