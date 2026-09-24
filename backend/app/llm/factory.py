@@ -4,6 +4,7 @@ from app.core.config import get_settings
 from app.llm.anthropic import AnthropicProvider
 from app.llm.interface import LLMProvider, LocalFallbackProvider
 from app.llm.openai import OpenAIProvider
+from app.llm.groq import GroqProvider
 
 
 def get_llm_provider(provider_name: str | None = None) -> LLMProvider:
@@ -12,4 +13,6 @@ def get_llm_provider(provider_name: str | None = None) -> LLMProvider:
         return AnthropicProvider()
     if provider == "openai":
         return OpenAIProvider()
+    if provider == "groq":
+        return GroqProvider()
     return LocalFallbackProvider()
