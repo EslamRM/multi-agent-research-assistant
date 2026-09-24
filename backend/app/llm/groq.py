@@ -40,7 +40,12 @@ class GroqProvider(LLMProvider):
                 {"role": "user", "content": prompt},
             ],
         )
-        return response.choices[0].message.content or "{}"
+        content = response.choices[0].message.content or "{}"
+        # Groq models may return a wrapper such as "svg{...}" despite JSON mode.
+        content = content.strip()
+        if content.startswith("svg"):
+            content = content[3:].lstrip()
+        return content
 
     def plan_research(self, question: str) -> ResearchPlan:
         try:
