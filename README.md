@@ -215,3 +215,8 @@ This milestone intentionally keeps indexing synchronous and Markdown-only. PDF p
 ## Research quality evaluation
 
 The workflow now computes evidence-quality metadata before returning a report. The score considers evidence coverage, source diversity, citation coverage, and groundedness. The final report confidence is capped by this quality score, and limitations are augmented when evidence quality is weak. The API exposes the quality metadata so the frontend or future evaluation dashboard can inspect why confidence is limited.
+
+
+## Claim-level grounding
+
+The report pipeline now performs a deterministic post-generation grounding check. Each structured finding is compared with its linked and retrieved evidence, producing a support score, citation IDs, contradiction count, and warnings for weakly supported claims. Weak claim grounding reduces the final quality/confidence metadata instead of allowing a high-confidence report to hide unsupported findings.
