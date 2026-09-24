@@ -124,12 +124,21 @@ def _duckduckgo_search(query: str, limit: int) -> list[ResearchSource]:
 
 
 def search_sources(query: str, limit: int = 5) -> list[ResearchSource]:
-    providers = (_tavily_search, _wikipedia_search, _duckduckgo_search)
+    """Aggregate providers instead of accepting the first weak provider result."""
+    providers = (_tavily_search, _duckduckgo_search, _wikipedia_search)
+    merged: dict[str, ResearchSource] = {}
+
     for provider in providers:
         try:
-            sources = provider(query, limit)
-            if sources:
-                return sources[:limit]
+            provider_limit = max(2, min(limit, 5))
+            for source in provider(query, provider_limit):
+                key = source.url or source.id
+                merged.setdefault(key, source)
+                if len(merged) >= limit:
+                    break
         except (httpx.HTTPError, ValueError, KeyError, TypeError):
             continue
-    return []
+        if len(merged) >= limit:
+            break
+
+    return list(merged.values())[:limit]
