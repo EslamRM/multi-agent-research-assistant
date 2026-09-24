@@ -9,6 +9,7 @@ from app.graph.state import ResearchState
 from app.llm.factory import get_llm_provider
 from app.rag.retriever import QdrantRetriever
 from app.schemas.research import ResearchEvidence, ResearchSource, ResearchStatus
+from app.services.evaluation import evaluate_evidence
 from app.tools.search import search_sources
 
 logger = logging.getLogger(__name__)
@@ -48,12 +49,7 @@ def researcher_node(state: ResearchState) -> ResearchState:
                 title=item.title,
                 source_type="document",
                 url=item.source if item.source.startswith("http") else None,
-                metadata={
-                    "snippet": item.content,
-                    "score": item.score,
-                    "document_id": item.document_id,
-                    "chunk_index": item.metadata.get("chunk_index"),
-                },
+                metadata={"snippet": item.content, "score": item.score, "document_id": item.document_id, "chunk_index": item.metadata.get("chunk_index")},
             )
     except Exception:
         logger.info("Qdrant retrieval unavailable; continuing with web research.")
@@ -74,9 +70,11 @@ def researcher_node(state: ResearchState) -> ResearchState:
         for i, source in enumerate(state.sources, 1)
     ]
     state.completed_tasks = [task["id"] for task in state.tasks] if state.sources else []
-    state.metadata["source_count"] = len(state.sources)
-    state.metadata["evidence_count"] = len(state.evidence)
-    state.metadata["retrieval_types"] = sorted({source.source_type for source in state.sources})
+    state.metadata.update({
+        "source_count": len(state.sources),
+        "evidence_count": len(state.evidence),
+        "retrieval_types": sorted({source.source_type for source in state.sources}),
+    })
     return state
 
 
@@ -91,9 +89,7 @@ def quality_check_node(state: ResearchState) -> ResearchState:
 
 
 def summarizer_node(state: ResearchState) -> ResearchState:
-    state.summary = get_llm_provider().summarize_evidence(
-        [item.model_dump() for item in state.evidence], state.question
-    )
+    state.summary = get_llm_provider().summarize_evidence([item.model_dump() for item in state.evidence], state.question)
     state.status = ResearchStatus.summarizing
     return state
 
@@ -101,23 +97,19 @@ def summarizer_node(state: ResearchState) -> ResearchState:
 def reporter_node(state: ResearchState) -> ResearchState:
     state.status = ResearchStatus.reporting
     state.final_report = get_llm_provider().generate_report(
-        state.question,
-        state.summary,
-        [source.model_dump() for source in state.sources],
+        state.question, state.summary, [source.model_dump() for source in state.sources]
     )
+    quality = evaluate_evidence(state.evidence, state.summary)
+    state.metadata["quality"] = quality.__dict__
+    state.final_report.confidence = min(state.final_report.confidence, quality.overall)
+    state.final_report.limitations = list(dict.fromkeys(state.final_report.limitations + quality.warnings))
     state.status = ResearchStatus.completed
     return state
 
 
 def build_graph():
     workflow = StateGraph(ResearchState)
-    for name, node in {
-        "planner": planner_node,
-        "researcher": researcher_node,
-        "quality_check": quality_check_node,
-        "summarizer": summarizer_node,
-        "reporter": reporter_node,
-    }.items():
+    for name, node in {"planner": planner_node, "researcher": researcher_node, "quality_check": quality_check_node, "summarizer": summarizer_node, "reporter": reporter_node}.items():
         workflow.add_node(name, node)
     workflow.set_entry_point("planner")
     workflow.add_edge("planner", "researcher")
